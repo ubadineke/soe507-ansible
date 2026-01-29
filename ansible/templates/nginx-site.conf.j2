@@ -1,0 +1,19 @@
+server {
+    listen 80;
+    server_name _;
+
+    root /var/www;
+    index index.html;
+
+    {% for env in environments %}
+    location /{{ env.name }} {
+        alias {{ env.path }};
+        try_files $uri $uri/ /{{ env.name }}/index.html;
+    }
+    {% endfor %}
+
+    # Optional: Redirect root to dev or a 404
+    location / {
+        return 404;
+    }
+}

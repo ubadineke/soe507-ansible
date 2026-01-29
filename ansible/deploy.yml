@@ -1,0 +1,129 @@
+# ansible/deploy.yml
+---
+- name: Deploy React Landing Page to Remote VM
+  hosts: webservers
+  become: yes
+  
+  vars:
+    project_dir: "/home/{{ ansible_user }}/react-landing"
+    
+    environments:
+      - name: dev
+        path: /var/www/landing-dev
+        env_value: "development"
+        author: "Dev Team"
+      
+      - name: staging
+        path: /var/www/landing-staging
+        env_value: "staging"
+        author: "QA Team"
+      
+      - name: prod
+        path: /var/www/landing-prod
+        env_value: "production"
+        author: "Project Lead"
+  
+  tasks:
+    - name: Install system packages
+      apt:
+        name:
+          - nginx
+          - nodejs
+          - npm
+        state: present
+        update_cache: yes
+    
+    - name: Ensure Nginx is running
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+    
+    - name: Ensure project directory exists
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Copy React project to VM (Synchronize via SSH)
+      become: no
+      synchronize:
+        src: "{{ playbook_dir }}/../"
+        dest: "{{ project_dir }}/"
+        delete: no
+        recursive: yes
+        rsync_opts:
+          - "--exclude=node_modules"
+          - "--exclude=dist"
+          - "--exclude=ansible"
+          - "--exclude=.git"
+    
+    - name: Install npm dependencies
+      become: no
+      npm:
+        path: "{{ project_dir }}"
+        state: present
+    
+    - name: Build React application
+      become: no
+      command: npm run build
+      args:
+        chdir: "{{ project_dir }}"
+        creates: "{{ project_dir }}/dist/index.html"
+    
+    - name: Create environment directories
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: www-data
+        group: www-data
+        mode: '0755'
+      loop: "{{ environments }}"
+    
+    - name: Deploy build files to each environment
+      copy:
+        src: "{{ project_dir }}/dist/"
+        dest: "{{ item.path }}/"
+        remote_src: yes
+        owner: www-data
+        group: www-data
+        mode: '0755'
+      loop: "{{ environments }}"
+    
+    - name: Generate environment config files
+      template:
+        src: templates/config.js.j2
+        dest: "{{ item.path }}/config.js"
+        owner: www-data
+        group: www-data
+        mode: '0644'
+      loop: "{{ environments }}"
+    
+    - name: Deploy Nginx configuration
+      template:
+        src: templates/nginx-site.conf.j2
+        dest: /etc/nginx/sites-available/landing
+        owner: root
+        group: root
+        mode: '0644'
+      notify: reload nginx
+    
+    - name: Remove default Nginx site symlink
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      notify: reload nginx
+    
+    - name: Enable landing site
+      file:
+        src: /etc/nginx/sites-available/landing
+        dest: /etc/nginx/sites-enabled/landing
+        state: link
+      notify: reload nginx
+  
+  handlers:
+    - name: reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
