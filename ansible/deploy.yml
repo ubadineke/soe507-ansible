@@ -46,24 +46,13 @@
         owner: "{{ ansible_user }}"
         mode: '0755'
 
-    - name: Copy React project to VM (Synchronize via SSH)
-      become: no
-      synchronize:
-        src: "{{ playbook_dir }}/../"
-        dest: "{{ project_dir }}/"
-        delete: no
-        recursive: yes
-        rsync_opts:
-          - "--exclude=node_modules"
-          - "--exclude=dist"
-          - "--exclude=ansible"
-          - "--exclude=.git"
-    
+    - name: Copy React Project to VM (rsync)
+      command: rsync -av --exclude=node_modules --exclude=dist --exclude=.git ./ {{ project_dir }}/
+
     - name: Install npm dependencies
-      become: no
-      npm:
-        path: "{{ project_dir }}"
-        state: present
+      command: npm install
+      args:
+        chdir: "{{ project_dir }}"
     
     - name: Build React application
       become: no
